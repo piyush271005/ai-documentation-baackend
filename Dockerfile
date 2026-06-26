@@ -22,6 +22,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
+# Set fastembed cache dir and pre-download model during build
+ENV FASTEMBED_CACHE_DIR=/app/fastembed_cache
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/all-MiniLM-L6-v2')"
+
 # Copy the backend code into the app
 COPY . /app/backend
 
