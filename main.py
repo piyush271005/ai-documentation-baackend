@@ -11,7 +11,7 @@ logging.basicConfig(
 logger = logging.getLogger("main")
 
 app = FastAPI(
-    title="AI Documentation Search Engine",
+    title="docsense API",
     description="A semantic, keyword-hybrid documentation search engine built with FastAPI and ChromaDB.",
     version="1.0.0"
 )
@@ -35,7 +35,7 @@ async def on_startup():
 async def root():
     return {
         "status": "healthy",
-        "project": "AI Documentation Search Engine Backend",
+        "project": "docsense Backend",
         "docs_url": "/docs"
     }
 
