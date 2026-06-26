@@ -1,5 +1,5 @@
 import logging
-from sentence_transformers import SentenceTransformer
+from fastembed import TextEmbedding
 from backend.config import settings
 
 logger = logging.getLogger("embeddings")
@@ -13,10 +13,14 @@ class EmbeddingService:
     def model(self):
         """Lazy load the model when first requested."""
         if self._model is None:
-            logger.info(f"Loading sentence-transformers model '{self.model_name}'...")
+            logger.info(f"Loading fastembed model '{self.model_name}'...")
             try:
                 # Load locally, it will download and cache automatically
-                self._model = SentenceTransformer(self.model_name)
+                # Map all-MiniLM-L6-v2 to sentence-transformers/all-MiniLM-L6-v2 for fastembed compatibility
+                mapped_model_name = self.model_name
+                if mapped_model_name == "all-MiniLM-L6-v2":
+                    mapped_model_name = "sentence-transformers/all-MiniLM-L6-v2"
+                self._model = TextEmbedding(model_name=mapped_model_name)
                 logger.info("Model loaded successfully.")
             except Exception as e:
                 logger.error(f"Failed to load embedding model: {e}")
@@ -25,13 +29,14 @@ class EmbeddingService:
 
     def embed_query(self, text: str) -> list[float]:
         """Embed a single user query."""
-        embedding = self.model.encode(text, convert_to_numpy=True)
-        return embedding.tolist()
+        embeddings = list(self.model.embed([text]))
+        return embeddings[0].tolist()
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """Embed a batch of document texts."""
-        embeddings = self.model.encode(texts, convert_to_numpy=True)
-        return embeddings.tolist()
+        embeddings = list(self.model.embed(texts))
+        return [emb.tolist() for emb in embeddings]
 
 # Global singleton instance
 embedding_service = EmbeddingService()
+
