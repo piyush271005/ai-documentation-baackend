@@ -22,8 +22,8 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     DEFAULT_LLM_PROVIDER: str = "mock"  # options: mock, openai, gemini, ollama
     
-    # Embedding model name
-    EMBEDDING_MODEL_NAME: str = "all-MiniLM-L6-v2"
+    # Embedding model name (Google GenAI)
+    EMBEDDING_MODEL_NAME: str = "text-embedding-004"
     
     class Config:
         env_file = ".env"

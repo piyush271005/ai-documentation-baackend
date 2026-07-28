@@ -25,9 +25,7 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def on_startup():
-    logger.info("Application starting up... Initializing indices.")
-   
-    hybrid_retriever.initialize_from_db()
+    logger.info("Application starting up...")
 
 @app.get("/")
 async def root():
