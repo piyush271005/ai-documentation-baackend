@@ -94,6 +94,11 @@ async def run_crawl_pipeline(url: str, max_pages: int, limit_domain: bool):
             logger.warning("Crawl finished but no pages were extracted.")
             return
 
+        # Explicit memory cleanup after crawl completes
+        import gc
+        crawler_coordinator.crawled_content.clear()
+        gc.collect()
+
         logger.info(f"RAG Ingestion pipeline finished. Total chunks indexed: {total_chunks_indexed}")
 
     except Exception as e:

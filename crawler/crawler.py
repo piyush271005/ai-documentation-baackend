@@ -126,6 +126,8 @@ class CrawlCoordinator:
                         await parse_sitemap(loc.strip(), depth + 1)
                 # Regular sitemap — collect <url><loc> entries
                 for url_tag in root.findall(f"{NS}url"):
+                    if len(article_urls) >= self.max_pages * 3:
+                        break
                     loc = url_tag.findtext(f"{NS}loc")
                     if loc:
                         loc = loc.strip().rstrip("/")
@@ -137,9 +139,9 @@ class CrawlCoordinator:
                 logger.debug(f"Sitemap parse error for {sm_url}: {e}")
 
         for sm_url in sitemap_urls_to_try:
+            if len(article_urls) >= self.max_pages * 3:
+                break
             await parse_sitemap(sm_url)
-            if article_urls:
-                break  # Stop after first successful sitemap
 
         logger.info(f"Sitemap discovery found {len(article_urls)} URLs for {base_url}")
         return article_urls

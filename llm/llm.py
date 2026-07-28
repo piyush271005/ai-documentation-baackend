@@ -118,9 +118,9 @@ class LLMService:
 
     async def _call_ollama(self, system_prompt: str, user_prompt: str) -> str:
         url = f"{settings.OLLAMA_BASE_URL}/api/generate"
-        # We can use a lightweight model like llama3 or similar
+        
         data = {
-            "model": "llama3",
+            "model": "llama3.2:3b",
             "prompt": f"{system_prompt}\n\n{user_prompt}",
             "system": system_prompt,
             "stream": False,
@@ -136,10 +136,10 @@ class LLMService:
                     return result["response"].strip()
                 else:
                     logger.error(f"Ollama error: {res.status_code} - {res.text}")
-                    return f"Error from local Ollama (Status {res.status_code}): Make sure Ollama is running and has the 'llama3' model loaded."
+                    return f"Error from local Ollama (Status {res.status_code}): Make sure Ollama is running and has the 'llama3.2:3b' model loaded."
         except Exception as e:
             logger.error(f"Failed to connect to Ollama: {e}")
-            return f"Could not connect to Ollama. Make sure it is running at {settings.OLLAMA_BASE_URL} and the model 'llama3' is pulled."
+            return f"Could not connect to Ollama. Make sure it is running at {settings.OLLAMA_BASE_URL} and the model 'llama3.2:3b' is pulled."
 
     def _generate_mock_answer(self, query: str, chunks: list[dict]) -> str:
         """
