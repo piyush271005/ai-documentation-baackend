@@ -29,31 +29,51 @@ class DocParser:
     @classmethod
     def extract_links(cls, html_content: str, base_url: str, limit_domain: bool = True) -> list[str]:
         """Extract all valid hyperlinks from the page belonging to the same domain."""
-        soup = cls.clean_html(html_content)
+        # NOTE: Use raw BeautifulSoup (not clean_html) so we don't strip <nav>/<header>
+        # which contain most article links on news sites.
+        soup = BeautifulSoup(html_content, "html.parser")
         parsed_base = urlparse(base_url)
-        base_domain = parsed_base.netloc
-        
+        base_domain = parsed_base.netloc  # e.g. "timesofindia.indiatimes.com"
+
+        # Derive the registrable base domain (last two parts) for subdomain matching
+        # e.g. "timesofindia.indiatimes.com" -> "indiatimes.com"
+        base_parts = base_domain.split(".")
+        root_domain = ".".join(base_parts[-2:]) if len(base_parts) >= 2 else base_domain
+
         links = []
         for anchor in soup.find_all("a", href=True):
-            href = anchor["href"]
+            href = anchor["href"].strip()
+            if not href or href.startswith(("javascript:", "mailto:", "tel:", "#")):
+                continue
             # Join relative paths
             absolute_url = urljoin(base_url, href)
-            # Remove url fragments (#section-1) and query params to avoid duplicate page crawls
+            # Remove url fragments (#section) and query params to avoid duplicate crawls
             parsed_url = urlparse(absolute_url)
-            clean_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}"
-            
+            clean_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}".rstrip("/")
+
             # Keep links only if they are HTTP/HTTPS
             if parsed_url.scheme not in ("http", "https"):
                 continue
-                
+
+            # Skip non-HTML resources
+            path_lower = parsed_url.path.lower()
+            if any(path_lower.endswith(ext) for ext in (
+                ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp",
+                ".pdf", ".zip", ".mp4", ".mp3", ".css", ".js"
+            )):
+                continue
+
             if limit_domain:
-                if parsed_url.netloc == base_domain:
+                link_domain = parsed_url.netloc
+                # Allow: exact match OR same root domain (subdomain of the same site)
+                if link_domain == base_domain or link_domain.endswith("." + root_domain):
                     links.append(clean_url)
             else:
                 links.append(clean_url)
-                
+
         # Return unique links, preserving order
         return list(dict.fromkeys(links))
+
 
     @classmethod
     def parse_document(cls, html_content: str, url: str) -> dict:

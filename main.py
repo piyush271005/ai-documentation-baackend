@@ -10,19 +10,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger("main")
 
-app = FastAPI(
-    title="docsense API",
-    description="A semantic, keyword-hybrid documentation search engine built with FastAPI and ChromaDB.",
-    version="1.0.0"
-)
+app = FastAPI()
+
+
 
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  
+    allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["*"],
-    allow_headers=["*"]
+    allow_headers=["*"],
 )
 
 @app.on_event("startup")
@@ -42,6 +40,7 @@ async def root():
 # Register API Router
 app.include_router(api_router)
 
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("backend.main:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("backend.main:app", host="127.0.0.1", port=8000, reload=True, http="h11")

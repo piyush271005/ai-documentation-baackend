@@ -8,15 +8,21 @@ logger = logging.getLogger("db")
 
 class VectorStore:
     def __init__(self):
-        self.db_dir = settings.CHROMA_DB_DIR
-        # Ensure the directory exists
-        Path(self.db_dir).mkdir(parents=True, exist_ok=True)
-        
-        logger.info(f"Initializing ChromaDB persistent client at: {self.db_dir}")
-        self.client = chromadb.PersistentClient(path=self.db_dir)
+        if settings.CHROMA_API_KEY:
+            # --- ChromaDB Cloud mode ---
+            logger.info(f"Connecting to ChromaDB Cloud (tenant={settings.CHROMA_TENANT}, db={settings.CHROMA_DATABASE})")
+            self.client = chromadb.CloudClient(
+                tenant=settings.CHROMA_TENANT,
+                database=settings.CHROMA_DATABASE,
+                api_key=settings.CHROMA_API_KEY,
+            )
+        else:
+            # --- Local persistent mode ---
+            Path(settings.CHROMA_DB_DIR).mkdir(parents=True, exist_ok=True)
+            logger.info(f"Initializing ChromaDB persistent client at: {settings.CHROMA_DB_DIR}")
+            self.client = chromadb.PersistentClient(path=settings.CHROMA_DB_DIR)
+
         self.collection_name = "ai_docs"
-        
-        # Initialize collection
         self.collection = self.client.get_or_create_collection(
             name=self.collection_name,
             metadata={"hnsw:space": "cosine"}

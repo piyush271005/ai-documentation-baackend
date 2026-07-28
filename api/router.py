@@ -24,41 +24,78 @@ def get_settings_response() -> SettingsResponse:
         ollama_url=settings.OLLAMA_BASE_URL
     )
 
+def _index_pages(pages: list, chunker: Chunker) -> int:
+    """Chunk, embed, and store a batch of pages. Returns number of chunks stored."""
+    all_chunks = []
+    for page in pages:
+        chunks = chunker.chunk_document(page)
+        all_chunks.extend(chunks)
+    if not all_chunks:
+        return 0
+    texts = [c["content"] for c in all_chunks]
+    embeddings = embedding_service.embed_documents(texts)
+    vector_store.add_chunks(all_chunks, embeddings)
+    hybrid_retriever.update_index(all_chunks)
+    return len(all_chunks)
+
+
 async def run_crawl_pipeline(url: str, max_pages: int, limit_domain: bool):
-    """Ingestion pipeline running in background."""
+    """
+    Pipelined ingestion: crawling and indexing run concurrently.
+    A consumer task processes completed pages in batches while the
+    crawler is still running, so post-crawl indexing delay is near-zero.
+    """
+    chunker = Chunker()
+    indexed_count = 0          # number of pages already sent to indexer
+    total_chunks_indexed = 0
+
+    async def indexing_consumer():
+        """Picks up newly crawled pages every 2s and indexes them in batches."""
+        nonlocal indexed_count, total_chunks_indexed
+        BATCH_SIZE = 5
+
+        while crawler_coordinator.is_crawling:
+            await asyncio.sleep(2)  # poll every 2 seconds
+            available = crawler_coordinator.crawled_content
+            new_pages = available[indexed_count:]
+            if len(new_pages) >= BATCH_SIZE:
+                batch = new_pages[:BATCH_SIZE]
+                indexed_count += len(batch)
+                logger.info(f"[Pipeline] Indexing batch of {len(batch)} pages mid-crawl...")
+                n = await asyncio.get_event_loop().run_in_executor(
+                    None, _index_pages, batch, chunker
+                )
+                total_chunks_indexed += n
+                logger.info(f"[Pipeline] Batch done — {n} chunks stored ({total_chunks_indexed} total so far)")
+
     try:
-        # 1. Run the web crawl BFS loop
-        await crawler_coordinator.run_crawl(url, max_pages, limit_domain)
-        
-        crawled_pages = crawler_coordinator.crawled_content
-        if not crawled_pages:
+        # Run crawler + indexing consumer concurrently
+        crawl_task = asyncio.create_task(
+            crawler_coordinator.run_crawl(url, max_pages, limit_domain)
+        )
+        consumer_task = asyncio.create_task(indexing_consumer())
+
+        await crawl_task        # wait for crawl to finish
+        consumer_task.cancel()  # stop the consumer loop
+        try:
+            await consumer_task
+        except asyncio.CancelledError:
+            pass
+
+        # Final flush: index any pages that arrived after the last batch
+        remaining_pages = crawler_coordinator.crawled_content[indexed_count:]
+        if remaining_pages:
+            logger.info(f"[Pipeline] Final flush: indexing {len(remaining_pages)} remaining pages...")
+            n = await asyncio.get_event_loop().run_in_executor(
+                None, _index_pages, remaining_pages, chunker
+            )
+            total_chunks_indexed += n
+        elif not crawler_coordinator.crawled_content:
             logger.warning("Crawl finished but no pages were extracted.")
             return
-            
-        # 2. Chunk crawled documents
-        chunker = Chunker()
-        all_chunks = []
-        for page in crawled_pages:
-            chunks = chunker.chunk_document(page)
-            all_chunks.extend(chunks)
-            
-        if not all_chunks:
-            logger.warning("No chunks generated from crawled documents.")
-            return
-            
-        logger.info(f"Chunked {len(crawled_pages)} pages into {len(all_chunks)} chunks. Generating embeddings...")
-        
-        # 3. Generate embeddings in batch
-        texts_to_embed = [c["content"] for c in all_chunks]
-        embeddings = embedding_service.embed_documents(texts_to_embed)
-        
-        # 4. Insert chunks and embeddings into ChromaDB
-        vector_store.add_chunks(all_chunks, embeddings)
-        
-        # 5. Rebuild / update BM25 search index
-        hybrid_retriever.update_index(all_chunks)
-        
-        logger.info("RAG Ingestion pipeline finished successfully.")
+
+        logger.info(f"RAG Ingestion pipeline finished. Total chunks indexed: {total_chunks_indexed}")
+
     except Exception as e:
         logger.error(f"Error executing ingestion pipeline: {e}")
         crawler_coordinator.is_crawling = False
