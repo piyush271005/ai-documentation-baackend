@@ -40,24 +40,26 @@ class LLMService:
         sys_prompt, user_prompt = self._create_rag_prompt(query, chunks)
         
         if provider == "openai":
-            key = settings.OPENAI_API_KEY
+            key = settings.OPENAI_API_KEY or os.environ.get("OPENAI_API_KEY")
             if not key:
-                logger.warning("OpenAI API Key is missing. Falling back to Mock provider.")
-                return self._generate_mock_answer(query, chunks)
+                return "OpenAI API key is missing. Please set your OPENAI_API_KEY in LLM Settings."
             return await self._call_openai(sys_prompt, user_prompt, key)
             
         elif provider == "gemini":
-            key = settings.GEMINI_API_KEY
+            key = settings.GEMINI_API_KEY or os.environ.get("GEMINI_API_KEY")
             if not key:
-                logger.warning("Gemini API Key is missing. Falling back to Mock provider.")
-                return self._generate_mock_answer(query, chunks)
+                return "Gemini API key is missing. Please set your GEMINI_API_KEY in LLM Settings."
             return await self._call_gemini(sys_prompt, user_prompt, key)
             
         elif provider == "ollama":
             return await self._call_ollama(sys_prompt, user_prompt)
             
         else:
-            return self._generate_mock_answer(query, chunks)
+            # Default to Gemini if set, otherwise prompt for provider configuration
+            key = settings.GEMINI_API_KEY or os.environ.get("GEMINI_API_KEY")
+            if key:
+                return await self._call_gemini(sys_prompt, user_prompt, key)
+            return "No active LLM provider configured. Please select Gemini, OpenAI, or Ollama in LLM Settings and provide an API key."
 
     async def _call_openai(self, system_prompt: str, user_prompt: str, api_key: str) -> str:
         url = "https://api.openai.com/v1/chat/completions"
@@ -141,60 +143,7 @@ class LLMService:
             logger.error(f"Failed to connect to Ollama: {e}")
             return f"Could not connect to Ollama. Make sure it is running at {settings.OLLAMA_BASE_URL} and the model 'llama3.2:3b' is pulled."
 
-    def _generate_mock_answer(self, query: str, chunks: list[dict]) -> str:
-        """
-        Rule-based fallback when no LLM API is configured.
-        Synthesizes ALL retrieved chunks into one comprehensive answer.
-        """
-        if not chunks:
-            return "No matching documentation snippets were found to answer your question."
 
-        query_words = set(query.lower().split())
-
-        # Collect the most relevant sentences from ALL chunks (not just 3)
-        all_sentences = []
-        for idx, chunk in enumerate(chunks):
-            content = chunk["content"]
-            sentences = re.split(r"(?<=[.!?])\s+", content)
-            for sent in sentences:
-                sent = sent.strip()
-                if len(sent) < 20:
-                    continue
-                overlap = len(set(sent.lower().split()) & query_words)
-                all_sentences.append((overlap, idx, sent))
-
-        # Sort by relevance (keyword overlap), then take top sentences
-        all_sentences.sort(key=lambda x: x[0], reverse=True)
-        top_sentences = all_sentences[:12]  # Up to 12 best sentences
-        # Re-sort top sentences by their original chunk order for narrative flow
-        top_sentences.sort(key=lambda x: x[1])
-
-        # Build one cohesive answer
-        primary_title = chunks[0]["title"]
-        source_urls = list(dict.fromkeys(c["url"] for c in chunks))
-
-        answer = f"## {query}\n\n"
-
-        # Group sentences by section (chunk) for natural flow
-        current_chunk = -1
-        for _, chunk_idx, sent in top_sentences:
-            chunk = chunks[chunk_idx]
-            section = chunk.get("parent_header") or chunk["title"]
-            if chunk_idx != current_chunk:
-                current_chunk = chunk_idx
-                answer += f"### {section}\n\n"
-            answer += f"{sent} "
-
-        answer = answer.strip()
-
-        # Add sources footer
-        answer += "\n\n---\n**Sources:**\n"
-        for i, url in enumerate(source_urls, 1):
-            answer += f"- [{i}] {url}\n"
-
-        answer += "\n\n*Note: Using rule-based synthesis (no LLM key configured). For AI-generated answers, add a Gemini or OpenAI key in the Settings panel.*"
-
-        return answer
 
 # Global LLM service instance
 llm_service = LLMService()
