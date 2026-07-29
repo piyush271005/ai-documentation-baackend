@@ -41,10 +41,12 @@ class SettingsRequest(BaseModel):
     llm_provider: str
     openai_key: Optional[str] = ""
     gemini_key: Optional[str] = ""
+    groq_key: Optional[str] = ""
     ollama_url: Optional[str] = ""
 
 class SettingsResponse(BaseModel):
     llm_provider: str
     openai_key_configured: bool
     gemini_key_configured: bool
+    groq_key_configured: bool
     ollama_url: str

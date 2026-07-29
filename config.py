@@ -19,8 +19,9 @@ class Settings(BaseSettings):
     # LLM Settings & Keys
     OPENAI_API_KEY: str = ""
     GEMINI_API_KEY: str = ""
+    GROQ_API_KEY: str = ""
     OLLAMA_BASE_URL: str = "http://localhost:11434"
-    DEFAULT_LLM_PROVIDER: str = "gemini"  # options: gemini, openai, ollama
+    DEFAULT_LLM_PROVIDER: str = "gemini"  # options: gemini, groq, openai, ollama
     
     # Embedding model name (Google GenAI)
     EMBEDDING_MODEL_NAME: str = "text-embedding-004"

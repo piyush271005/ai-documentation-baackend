@@ -51,15 +51,24 @@ class LLMService:
                 return "Gemini API key is missing. Please set your GEMINI_API_KEY in LLM Settings."
             return await self._call_gemini(sys_prompt, user_prompt, key)
             
+        elif provider == "groq":
+            key = settings.GROQ_API_KEY or os.environ.get("GROQ_API_KEY")
+            if not key:
+                return "Groq API key is missing. Please set your GROQ_API_KEY in LLM Settings."
+            return await self._call_groq(sys_prompt, user_prompt, key)
+
         elif provider == "ollama":
             return await self._call_ollama(sys_prompt, user_prompt)
             
         else:
-            # Default to Gemini if set, otherwise prompt for provider configuration
+            # Default to Gemini if set, otherwise try Groq or prompt for provider configuration
             key = settings.GEMINI_API_KEY or os.environ.get("GEMINI_API_KEY")
             if key:
                 return await self._call_gemini(sys_prompt, user_prompt, key)
-            return "No active LLM provider configured. Please select Gemini, OpenAI, or Ollama in LLM Settings and provide an API key."
+            groq_key = settings.GROQ_API_KEY or os.environ.get("GROQ_API_KEY")
+            if groq_key:
+                return await self._call_groq(sys_prompt, user_prompt, groq_key)
+            return "No active LLM provider configured. Please select Gemini, Groq, OpenAI, or Ollama in LLM Settings and provide an API key."
 
     async def _call_openai(self, system_prompt: str, user_prompt: str, api_key: str) -> str:
         url = "https://api.openai.com/v1/chat/completions"
@@ -117,6 +126,34 @@ class LLMService:
         except Exception as e:
             logger.error(f"Failed to connect to Gemini: {e}")
             return f"Error contacting Gemini: {str(e)}"
+
+    async def _call_groq(self, system_prompt: str, user_prompt: str, api_key: str) -> str:
+        """Call Groq API (OpenAI-compatible endpoint with Llama 3.3 70B)."""
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": "llama-3.3-70b-versatile",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            "temperature": 0.2
+        }
+        try:
+            async with httpx.AsyncClient() as client:
+                res = await client.post(url, json=data, headers=headers, timeout=30.0)
+                if res.status_code == 200:
+                    result = res.json()
+                    return result["choices"][0]["message"]["content"].strip()
+                else:
+                    logger.error(f"Groq error: {res.status_code} - {res.text}")
+                    return f"Error from Groq API (Status {res.status_code}): {res.text[:100]}"
+        except Exception as e:
+            logger.error(f"Failed to connect to Groq: {e}")
+            return f"Error contacting Groq API: {str(e)}"
 
     async def _call_ollama(self, system_prompt: str, user_prompt: str) -> str:
         url = f"{settings.OLLAMA_BASE_URL}/api/generate"

@@ -21,6 +21,7 @@ def get_settings_response() -> SettingsResponse:
         llm_provider=settings.DEFAULT_LLM_PROVIDER,
         openai_key_configured=bool(settings.OPENAI_API_KEY),
         gemini_key_configured=bool(settings.GEMINI_API_KEY),
+        groq_key_configured=bool(settings.GROQ_API_KEY),
         ollama_url=settings.OLLAMA_BASE_URL
     )
 
@@ -212,6 +213,8 @@ async def update_settings(req: SettingsRequest):
         settings.OPENAI_API_KEY = req.openai_key
     if req.gemini_key is not None:
         settings.GEMINI_API_KEY = req.gemini_key
+    if req.groq_key is not None:
+        settings.GROQ_API_KEY = req.groq_key
     if req.ollama_url is not None:
         settings.OLLAMA_BASE_URL = req.ollama_url
     return get_settings_response()
