@@ -2,7 +2,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.api.router import router as api_router
-from backend.retrieval.reranker import hybrid_retriever
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,7 +35,7 @@ async def root():
         "docs_url": "/docs"
     }
 
-# Register API Router
+
 app.include_router(api_router)
 
 

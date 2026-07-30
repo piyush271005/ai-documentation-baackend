@@ -9,22 +9,15 @@ from backend.parser.parser import DocParser
 logger = logging.getLogger("crawler")
 logging.basicConfig(level=logging.INFO)
 
-# Full browser-realistic headers to bypass basic anti-bot detection.
-# NOTE: Accept-Encoding is intentionally omitted — httpx auto-negotiates
-# compression (gzip/deflate) based on what's installed. Manually setting
-# "br" (brotli) without the brotli package causes garbled/empty responses.
+
 BROWSER_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/125.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
-    "DNT": "1",
-    "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Sec-Fetch-User": "?1",
-    "Cache-Control": "max-age=0",
 }
 
 class CrawlCoordinator:
@@ -75,76 +68,24 @@ class CrawlCoordinator:
             return True
         return False
 
-    async def _fetch_sitemap_urls(self, client: httpx.AsyncClient, base_url: str) -> list[str]:
-        """
-        Attempt to discover article URLs via sitemap.xml / sitemap_index.xml / robots.txt.
-        Returns a list of same-domain URLs found in the sitemap.
-        """
-        parsed = urlparse(base_url)
-        origin = f"{parsed.scheme}://{parsed.netloc}"
-        base_parts = parsed.netloc.split(".")
-        root_domain = ".".join(base_parts[-2:]) if len(base_parts) >= 2 else parsed.netloc
+    async def fetch_sitemap_urls(self, client, base_url):
+     origin = f"{urlparse(base_url).scheme}://{urlparse(base_url).netloc}"
 
-        sitemap_urls_to_try = []
+     response = await client.get(f"{origin}/sitemap.xml")
 
-        # 1. Check robots.txt for Sitemap: directives
-        try:
-            robots_resp = await client.get(f"{origin}/robots.txt", headers=BROWSER_HEADERS, timeout=10.0)
-            if robots_resp.status_code == 200:
-                for line in robots_resp.text.splitlines():
-                    if line.lower().startswith("sitemap:"):
-                        sm_url = line.split(":", 1)[1].strip()
-                        sitemap_urls_to_try.append(sm_url)
-                        logger.info(f"Found sitemap in robots.txt: {sm_url}")
-        except Exception:
-            pass
+     if response.status_code != 200:
+        return []
 
-        # 2. Common fallback sitemap locations
-        for path in ["/sitemap.xml", "/sitemap_index.xml", "/news-sitemap.xml"]:
-            sitemap_urls_to_try.append(f"{origin}{path}")
+     root = ET.fromstring(response.text)
 
-        article_urls = []
-        seen_sitemaps = set()
-        NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
+     urls = []
 
-        async def parse_sitemap(sm_url: str, depth: int = 0):
-            if sm_url in seen_sitemaps or depth > 2:
-                return
-            seen_sitemaps.add(sm_url)
-            try:
-                resp = await client.get(sm_url, headers=BROWSER_HEADERS, timeout=10.0, follow_redirects=True)
-                if resp.status_code != 200:
-                    return
-                ct = resp.headers.get("content-type", "")
-                if "xml" not in ct and "text" not in ct:
-                    return
-                root = ET.fromstring(resp.text)
-                # Sitemap index — recurse into child sitemaps
-                for sitemap_tag in root.findall(f"{NS}sitemap"):
-                    loc = sitemap_tag.findtext(f"{NS}loc")
-                    if loc:
-                        await parse_sitemap(loc.strip(), depth + 1)
-                # Regular sitemap — collect <url><loc> entries
-                for url_tag in root.findall(f"{NS}url"):
-                    if len(article_urls) >= self.max_pages * 3:
-                        break
-                    loc = url_tag.findtext(f"{NS}loc")
-                    if loc:
-                        loc = loc.strip().rstrip("/")
-                        p = urlparse(loc)
-                        # Only keep same-domain URLs
-                        if p.netloc == parsed.netloc or p.netloc.endswith("." + root_domain):
-                            article_urls.append(loc)
-            except Exception as e:
-                logger.debug(f"Sitemap parse error for {sm_url}: {e}")
+     for url_tag in root.findall("{http://www.sitemaps.org/schemas/sitemap/0.9}url"):
+        loc = url_tag.findtext("{http://www.sitemaps.org/schemas/sitemap/0.9}loc")
+        if loc:
+            urls.append(loc.strip())
 
-        for sm_url in sitemap_urls_to_try:
-            if len(article_urls) >= self.max_pages * 3:
-                break
-            await parse_sitemap(sm_url)
-
-        logger.info(f"Sitemap discovery found {len(article_urls)} URLs for {base_url}")
-        return article_urls
+     return urls
 
     async def crawl_page(self, client: httpx.AsyncClient, url: str, depth: int):
         """Downloads a single page, parses content, and queues outgoing links."""
