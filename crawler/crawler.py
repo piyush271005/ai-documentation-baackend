@@ -100,7 +100,7 @@ class CrawlCoordinator:
         try:
             response = await client.get(url, headers=BROWSER_HEADERS, timeout=15.0, follow_redirects=True)
 
-            # Handle rate-limiting: wait and retry once
+            
             if response.status_code == 429:
                 retry_after = int(response.headers.get("Retry-After", 5))
                 logger.warning(f"Rate limited by {url}. Retrying after {retry_after}s...")
@@ -131,8 +131,8 @@ class CrawlCoordinator:
             self.crawled_content.append(parsed_doc)
             self.pages_crawled.append(url)
             
-            # Extract links and queue them for next depth level
-            if depth < 3:  # Max BFS depth of 3 to avoid infinite crawl
+            
+            if depth < 3: 
                 outgoing_links = DocParser.extract_links(html_content, url, limit_domain=self.limit_domain)
                 logger.info(f"Found {len(outgoing_links)} outgoing links on {url}")
                 for link in outgoing_links:
@@ -154,7 +154,7 @@ class CrawlCoordinator:
         self.reset()
         self.is_crawling = True
         self.max_pages = max_pages
-        self.limit_domain = limit_domain
+        self.limit_domain = True
         self.start_url = start_url
 
         # Establish base domain restriction

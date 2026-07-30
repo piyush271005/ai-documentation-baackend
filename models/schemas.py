@@ -4,7 +4,6 @@ from typing import List, Optional, Dict, Any
 class CrawlRequest(BaseModel):
     url: str = Field(..., description="The base URL of the documentation site to crawl")
     max_pages: int = Field(50, ge=1, le=500, description="Maximum number of pages to crawl")
-    limit_domain: bool = Field(True, description="Limit crawling to the base domain of the start URL")
 
 class CrawlResponse(BaseModel):
     status: str

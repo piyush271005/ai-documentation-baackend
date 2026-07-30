@@ -40,7 +40,7 @@ def _index_pages(pages: list, chunker: Chunker) -> int:
     return len(all_chunks)
 
 
-async def run_crawl_pipeline(url: str, max_pages: int, limit_domain: bool):
+async def run_crawl_pipeline(url: str, max_pages: int):
     """
     Pipelined ingestion: crawling and indexing run concurrently.
     A consumer task processes completed pages in batches while the
@@ -72,7 +72,7 @@ async def run_crawl_pipeline(url: str, max_pages: int, limit_domain: bool):
     try:
         # Run crawler + indexing consumer concurrently
         crawl_task = asyncio.create_task(
-            crawler_coordinator.run_crawl(url, max_pages, limit_domain)
+            crawler_coordinator.run_crawl(url, max_pages, limit_domain=True)
         )
         consumer_task = asyncio.create_task(indexing_consumer())
 
@@ -118,8 +118,7 @@ async def start_crawl(request: CrawlRequest, background_tasks: BackgroundTasks):
     background_tasks.add_task(
         run_crawl_pipeline,
         request.url,
-        request.max_pages,
-        request.limit_domain
+        request.max_pages
     )
     
     return CrawlResponse(
