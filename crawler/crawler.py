@@ -175,51 +175,36 @@ class CrawlCoordinator:
             async with semaphore:
                 await self.crawl_page(client, url, depth)
 
-        async with httpx.AsyncClient(
-            limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
-            timeout=httpx.Timeout(15.0)
-        ) as client:
-            # Store client reference so crawl_page can use it for sitemap fallback
-            self._client_ref = client
-
-            # Proactive sitemap seed: try to discover article URLs before starting BFS.
-            # This helps JS-heavy sites where the homepage has zero crawlable links.
-            logger.info("Pre-checking sitemap for article URL discovery...")
-            sitemap_urls = await self._fetch_sitemap_urls(client, start_url)
-            if sitemap_urls:
-                for sm_url in sitemap_urls[:max_pages * 3]:
-                    await self.push_to_queue(sm_url, 1)
-                logger.info(f"Pre-seeded {len(sitemap_urls)} sitemap URLs into BFS queue")
-
+        
             while self.is_crawling:
-                # Drain finished tasks
+                
                 done = {t for t in active_tasks if t.done()}
                 active_tasks -= done
 
-                # Stop if we've hit the page limit
+                
                 if len(self.pages_crawled) >= self.max_pages:
                     break
 
-                # Fill up to CONCURRENCY tasks from the queue
+                
                 while len(active_tasks) < CONCURRENCY:
                     queue_item = await self.pop_from_queue()
                     if not queue_item:
-                        break  # Nothing queued right now
+                        break  
                     url, depth = queue_item
-                    # Skip already-visited URLs early
+                   
                     if url in self.local_visited:
                         continue
                     task = asyncio.create_task(crawl_with_semaphore(client, url, depth))
                     active_tasks.add(task)
 
                 if not active_tasks:
-                    # Nothing in queue and no active tasks = done
+                   
                     break
 
-                # Wait for at least one task to finish before refilling
+                
                 await asyncio.wait(active_tasks, return_when=asyncio.FIRST_COMPLETED)
 
-            # Wait for all remaining tasks to finish
+            
             if active_tasks:
                 await asyncio.gather(*active_tasks, return_exceptions=True)
 
