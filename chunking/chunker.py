@@ -31,9 +31,9 @@ class Chunker:
             if not block_text:
                 continue
 
-            # Handle headings
+            
             if block_type == "heading":
-                # Flush previous section
+                
                 if current_chunk_text:
                     self._flush_chunk(
                         chunks,
@@ -45,11 +45,11 @@ class Chunker:
                     current_chunk_text = []
                     current_chunk_size = 0
 
-                # Update to the new section
+                
                 current_header = block_text
                 continue
 
-            # Handle code blocks separately
+            
             if block_type == "code_block":
                 if current_chunk_text:
                     self._flush_chunk(
@@ -73,7 +73,7 @@ class Chunker:
 
             block_len = len(block_text)
 
-            # Check chunk size
+            
             if (
                 current_chunk_size > 0
                 and current_chunk_size + block_len > self.target_chunk_size
@@ -93,7 +93,7 @@ class Chunker:
                 current_chunk_text.append(block_text)
                 current_chunk_size += block_len
 
-        # Flush remaining content
+        
         if current_chunk_text:
             self._flush_chunk(
                 chunks,
@@ -106,7 +106,7 @@ class Chunker:
         return chunks
     def _flush_chunk(self, chunks_list: List[Dict[str, Any]], text_list: List[str], url: str, title: str, header: str):
         full_text = "\n\n".join(text_list)
-        if len(full_text.strip()) < 30:  # Skip trivial chunks
+        if len(full_text.strip()) < 30:  
             return
             
         chunk_index = len(chunks_list)
