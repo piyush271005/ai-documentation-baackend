@@ -45,19 +45,28 @@ class EmbeddingService:
             logger.debug("[DEBUG] embed_documents called with empty text list. Returning empty list.")
             return []
         logger.debug(f"[DEBUG] Batch embedding {len(texts)} document chunks using model '{self.model_name}'...")
-        try:
-            api_key = settings.GEMINI_API_KEY or os.environ.get("GEMINI_API_KEY")
-            if not api_key:
-                logger.error("GEMINI_API_KEY missing for embedding documents. Returning fallback vectors.")
-                return [[0.0] * 768 for _ in texts]
+        
+        api_key = settings.GEMINI_API_KEY or os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            logger.error("GEMINI_API_KEY missing for embedding documents. Returning fallback vectors.")
+            return [[0.0] * 768 for _ in texts]
 
-            response = self.client.models.embed_content(
-                model=self.model_name,
-                contents=texts
-            )
-            vectors = [list(emb.values) for emb in response.embeddings]
-            logger.debug(f"[DEBUG] Batch embedding completed successfully: {len(vectors)} vectors generated.")
-            return vectors
+        BATCH_LIMIT = 90  # Google GenAI limits batch requests to max 100 items per call
+        all_vectors = []
+
+        try:
+            for i in range(0, len(texts), BATCH_LIMIT):
+                mini_batch = texts[i : i + BATCH_LIMIT]
+                logger.debug(f"[DEBUG] Requesting embedding mini-batch {i // BATCH_LIMIT + 1} ({len(mini_batch)} items)...")
+                response = self.client.models.embed_content(
+                    model=self.model_name,
+                    contents=mini_batch
+                )
+                mini_vectors = [list(emb.values) for emb in response.embeddings]
+                all_vectors.extend(mini_vectors)
+
+            logger.debug(f"[DEBUG] All {len(all_vectors)} vectors generated successfully across batch requests.")
+            return all_vectors
         except Exception as e:
             logger.error(f"Error embedding documents with Google GenAI API: {e}")
             return [[0.0] * 768 for _ in texts]
