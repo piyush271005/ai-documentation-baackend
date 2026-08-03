@@ -10,7 +10,6 @@ from backend.crawler.crawler import crawler_coordinator
 from backend.chunking.chunker import Chunker
 from backend.embeddings.embedding import embedding_service
 from backend.retrieval.db import vector_store
-from backend.retrieval.reranker import hybrid_retriever
 from backend.llm.llm import llm_service
 
 logger = logging.getLogger("router")
@@ -27,16 +26,19 @@ def get_settings_response() -> SettingsResponse:
 
 def _index_pages(pages: list, chunker: Chunker) -> int:
     """Chunk, embed, and store a batch of pages. Returns number of chunks stored."""
+    logger.debug(f"[DEBUG] _index_pages processing batch of {len(pages)} pages...")
     all_chunks = []
     for page in pages:
         chunks = chunker.chunk_document(page)
         all_chunks.extend(chunks)
     if not all_chunks:
+        logger.debug("[DEBUG] _index_pages: 0 chunks extracted from batch.")
         return 0
     texts = [c["content"] for c in all_chunks]
+    logger.debug(f"[DEBUG] _index_pages: Embedding {len(texts)} chunks...")
     embeddings = embedding_service.embed_documents(texts)
+    logger.debug(f"[DEBUG] _index_pages: Storing {len(all_chunks)} chunks in ChromaDB...")
     vector_store.add_chunks(all_chunks, embeddings)
-    hybrid_retriever.update_index(all_chunks)
     return len(all_chunks)
 
 
@@ -46,6 +48,7 @@ async def run_crawl_pipeline(url: str, max_pages: int):
     A consumer task processes completed pages in batches while the
     crawler is still running, so post-crawl indexing delay is near-zero.
     """
+    logger.debug(f"[DEBUG] Initiating run_crawl_pipeline for url='{url}', max_pages={max_pages}")
     chunker = Chunker()
     indexed_count = 0          # number of pages already sent to indexer
     total_chunks_indexed = 0
@@ -108,7 +111,9 @@ async def run_crawl_pipeline(url: str, max_pages: int):
 
 @router.post("/crawl", response_model=CrawlResponse)
 async def start_crawl(request: CrawlRequest, background_tasks: BackgroundTasks):
+    logger.debug(f"[DEBUG] POST /api/crawl request received: url='{request.url}', max_pages={request.max_pages}")
     if crawler_coordinator.is_crawling:
+        logger.debug("[DEBUG] Crawl request rejected: another crawl task is currently active.")
         return CrawlResponse(
             status="error",
             message="A crawl task is already running. Please wait.",
@@ -129,7 +134,9 @@ async def start_crawl(request: CrawlRequest, background_tasks: BackgroundTasks):
 
 @router.post("/query", response_model=QueryResponse)
 async def run_query(request: QueryRequest):
+    logger.debug(f"[DEBUG] POST /api/query received: query='{request.query}', provider='{request.llm_provider}'")
     if vector_store.count() == 0:
+        logger.debug("[DEBUG] Query rejected: ChromaDB collection count is 0.")
         raise HTTPException(
             status_code=400,
             detail="The knowledge base is empty. Please crawl a documentation site first!"
@@ -137,16 +144,15 @@ async def run_query(request: QueryRequest):
         
     try:
         # 1. Embed query
+        logger.debug("[DEBUG] Step 1: Embedding query string...")
         query_embedding = embedding_service.embed_query(request.query)
         
-        # 2. Hybrid retrieve Top-5 chunks (Vector + BM25 RRF)
-        top_chunks = hybrid_retriever.retrieve_hybrid(
-            request.query,
-            query_embedding,
-            top_n=5
-        )
+        # 2. Retrieve Top-5 vector similarity chunks from Chroma Cloud
+        logger.debug("[DEBUG] Step 2: Querying ChromaDB vector search...")
+        top_chunks = vector_store.search(query_embedding, limit=5)
         
         # 3. Synthesize LLM completion
+        logger.debug(f"[DEBUG] Step 3: Generating LLM answer using {len(top_chunks)} retrieved chunks...")
         answer = await llm_service.generate_answer(
             request.query,
             top_chunks,
@@ -169,6 +175,7 @@ async def run_query(request: QueryRequest):
                 )
             )
             
+        logger.debug(f"[DEBUG] Step 4: Query processing complete. Returning answer (len={len(answer)} chars) and {len(sources)} sources.")
         return QueryResponse(
             query=request.query,
             answer=answer,
@@ -182,6 +189,7 @@ async def run_query(request: QueryRequest):
 async def get_status():
     q_size = await crawler_coordinator.get_queue_size()
     total_chunks = vector_store.count()
+    logger.debug(f"[DEBUG] GET /api/status polled: crawling={crawler_coordinator.is_crawling}, crawled_pages={len(crawler_coordinator.pages_crawled)}, queue={q_size}, chunks={total_chunks}")
     return StatusResponse(
         is_crawling=crawler_coordinator.is_crawling,
         pages_crawled=len(crawler_coordinator.pages_crawled),
@@ -192,10 +200,11 @@ async def get_status():
 
 @router.post("/reset")
 async def reset_system():
+    logger.debug("[DEBUG] POST /api/reset request received. Resetting crawler and vector store...")
     try:
         crawler_coordinator.reset()
         vector_store.reset()
-        hybrid_retriever.reset()
+        logger.debug("[DEBUG] System reset operation successful.")
         return {"status": "success", "message": "Crawler buffers and ChromaDB collections have been reset."}
     except Exception as e:
         logger.error(f"Reset failed: {e}")
@@ -203,10 +212,12 @@ async def reset_system():
 
 @router.get("/settings", response_model=SettingsResponse)
 async def get_settings():
+    logger.debug("[DEBUG] GET /api/settings requested.")
     return get_settings_response()
 
 @router.post("/settings", response_model=SettingsResponse)
 async def update_settings(req: SettingsRequest):
+    logger.debug(f"[DEBUG] POST /api/settings received: provider='{req.llm_provider}'")
     settings.DEFAULT_LLM_PROVIDER = req.llm_provider
     if req.openai_key is not None:
         settings.OPENAI_API_KEY = req.openai_key
@@ -216,4 +227,5 @@ async def update_settings(req: SettingsRequest):
         settings.GROQ_API_KEY = req.groq_key
     if req.ollama_url is not None:
         settings.OLLAMA_BASE_URL = req.ollama_url
+    logger.debug("[DEBUG] Settings updated successfully.")
     return get_settings_response()

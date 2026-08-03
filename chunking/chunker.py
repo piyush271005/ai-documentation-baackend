@@ -1,17 +1,9 @@
-import hashlib
 from typing import List, Dict, Any
 
 class Chunker:
     def __init__(self, target_chunk_size: int = 800, overlap_sentences: int = 1):
         self.target_chunk_size = target_chunk_size
         self.overlap_sentences = overlap_sentences
-
-    @staticmethod
-    def generate_chunk_id(url: str, index: int, text: str) -> str:
-        """Generate a unique deterministic hash ID for a text chunk."""
-        hasher = hashlib.md5()
-        hasher.update(f"{url}||{index}||{text}".encode("utf-8"))
-        return hasher.hexdigest()
 
     def chunk_document(self, doc: Dict[str, Any]) -> List[Dict[str, Any]]:
         url = doc.get("url", "")
@@ -31,9 +23,7 @@ class Chunker:
             if not block_text:
                 continue
 
-            
             if block_type == "heading":
-                
                 if current_chunk_text:
                     self._flush_chunk(
                         chunks,
@@ -45,11 +35,9 @@ class Chunker:
                     current_chunk_text = []
                     current_chunk_size = 0
 
-                
                 current_header = block_text
                 continue
 
-            
             if block_type == "code_block":
                 if current_chunk_text:
                     self._flush_chunk(
@@ -73,7 +61,6 @@ class Chunker:
 
             block_len = len(block_text)
 
-            
             if (
                 current_chunk_size > 0
                 and current_chunk_size + block_len > self.target_chunk_size
@@ -93,7 +80,6 @@ class Chunker:
                 current_chunk_text.append(block_text)
                 current_chunk_size += block_len
 
-        
         if current_chunk_text:
             self._flush_chunk(
                 chunks,
@@ -104,13 +90,13 @@ class Chunker:
             )
 
         return chunks
+
     def _flush_chunk(self, chunks_list: List[Dict[str, Any]], text_list: List[str], url: str, title: str, header: str):
         full_text = "\n\n".join(text_list)
         if len(full_text.strip()) < 30:  
             return
             
-        chunk_index = len(chunks_list)
-        chunk_id = self.generate_chunk_id(url, chunk_index, full_text)
+        chunk_id = f"chunk_{len(chunks_list)}"
         chunks_list.append({
             "id": chunk_id,
             "url": url,

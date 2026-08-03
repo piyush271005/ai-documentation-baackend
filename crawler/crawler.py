@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import xml.etree.ElementTree as ET
 from urllib.parse import urlparse, urljoin
 import httpx
 from backend.config import settings
@@ -8,7 +7,6 @@ from backend.parser.parser import DocParser
 
 logger = logging.getLogger("crawler")
 logging.basicConfig(level=logging.INFO)
-
 
 BROWSER_HEADERS = {
     "User-Agent": (
@@ -21,7 +19,6 @@ BROWSER_HEADERS = {
 }
 
 class CrawlCoordinator:
-    """Manages crawl state, queue, and visited lists using in-memory queues."""
     def __init__(self):
         self.is_crawling = False
         self.pages_crawled = []
@@ -51,45 +48,30 @@ class CrawlCoordinator:
         return self.local_queue.qsize()
 
     async def push_to_queue(self, url: str, depth: int):
-        """Pushes (url, depth) to queue."""
         if url not in self.local_visited:
+            logger.debug(f"[DEBUG] Enqueuing URL for crawl: {url} at depth {depth}")
             await self.local_queue.put((url, depth))
+        else:
+            logger.debug(f"[DEBUG] Skipping enqueue for already-visited URL: {url}")
 
     async def pop_from_queue(self) -> tuple[str, int]:
-        """Pops (url, depth) from queue. Returns None if empty."""
         if not self.local_queue.empty():
-            return await self.local_queue.get()
+            item = await self.local_queue.get()
+            logger.debug(f"[DEBUG] Dequeued item for worker: {item[0]} (depth {item[1]})")
+            return item
         return None
 
     def mark_visited(self, url: str) -> bool:
-        """Marks a URL as visited. Returns True if it was NOT already visited."""
         if url not in self.local_visited:
             self.local_visited.add(url)
+            logger.debug(f"[DEBUG] Marked URL as visited ({len(self.local_visited)} total visited): {url}")
             return True
         return False
-
-    async def fetch_sitemap_urls(self, client, base_url):
-     origin = f"{urlparse(base_url).scheme}://{urlparse(base_url).netloc}"
-
-     response = await client.get(f"{origin}/sitemap.xml")
-
-     if response.status_code != 200:
-        return []
-
-     root = ET.fromstring(response.text)
-
-     urls = []
-
-     for url_tag in root.findall("{http://www.sitemaps.org/schemas/sitemap/0.9}url"):
-        loc = url_tag.findtext("{http://www.sitemaps.org/schemas/sitemap/0.9}loc")
-        if loc:
-            urls.append(loc.strip())
-
-     return urls
 
     async def crawl_page(self, client: httpx.AsyncClient, url: str, depth: int):
         """Downloads a single page, parses content, and queues outgoing links."""
         if len(self.pages_crawled) >= self.max_pages:
+            logger.debug(f"[DEBUG] Max pages limit reached ({self.max_pages}). Skipping {url}")
             return
             
         if not self.mark_visited(url):
@@ -98,9 +80,10 @@ class CrawlCoordinator:
         logger.info(f"Crawling URL: {url} at depth {depth}")
 
         try:
+            logger.debug(f"[DEBUG] Sending HTTP GET to {url}...")
             response = await client.get(url, headers=BROWSER_HEADERS, timeout=15.0, follow_redirects=True)
+            logger.debug(f"[DEBUG] Received response from {url}: status={response.status_code}, content_type={response.headers.get('content-type', '')}")
 
-            
             if response.status_code == 429:
                 retry_after = int(response.headers.get("Retry-After", 5))
                 logger.warning(f"Rate limited by {url}. Retrying after {retry_after}s...")
@@ -125,27 +108,19 @@ class CrawlCoordinator:
         except Exception as e:
             logger.error(f"Unexpected error crawling {url}: {e}")
             return
-        # Parse page content
+
+        
         try:
             parsed_doc = DocParser.parse_document(html_content, url)
             self.crawled_content.append(parsed_doc)
             self.pages_crawled.append(url)
-            
+            logger.debug(f"[DEBUG] Successfully indexed parsed content for {url} ({len(self.pages_crawled)}/{self.max_pages} crawled)")
             
             if depth < 3: 
                 outgoing_links = DocParser.extract_links(html_content, url, limit_domain=self.limit_domain)
                 logger.info(f"Found {len(outgoing_links)} outgoing links on {url}")
                 for link in outgoing_links:
                     await self.push_to_queue(link, depth + 1)
-                
-                # If zero links found on the start page, this is likely a JS-rendered site.
-                # Fall back to sitemap discovery to seed the queue.
-                if len(outgoing_links) == 0 and depth == 0 and hasattr(self, '_client_ref'):
-                    logger.warning(f"No links found on start page {url} — likely JS-rendered. Trying sitemap discovery...")
-                    sitemap_urls = await self._fetch_sitemap_urls(self._client_ref, url)
-                    for sm_url in sitemap_urls[:self.max_pages * 3]:  # Queue up to 3x max_pages candidates
-                        await self.push_to_queue(sm_url, 1)
-                    logger.info(f"Seeded {len(sitemap_urls)} URLs from sitemap into BFS queue")
         except Exception as e:
             logger.error(f"Error parsing content from {url}: {e}")
 
@@ -162,6 +137,7 @@ class CrawlCoordinator:
         self.base_domain = parsed_start.netloc
 
         logger.info(f"Starting concurrent BFS crawl from {start_url} (Max Pages: {max_pages})")
+        logger.debug(f"[DEBUG] Base domain restriction set to: {self.base_domain}")
 
         # Enqueue start URL at depth 0
         await self.push_to_queue(start_url, 0)
@@ -175,17 +151,18 @@ class CrawlCoordinator:
             async with semaphore:
                 await self.crawl_page(client, url, depth)
 
-        
+        async with httpx.AsyncClient(
+            limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
+            timeout=httpx.Timeout(15.0)
+        ) as client:
             while self.is_crawling:
-                
                 done = {t for t in active_tasks if t.done()}
                 active_tasks -= done
 
-                
                 if len(self.pages_crawled) >= self.max_pages:
+                    logger.debug(f"[DEBUG] Worker pool loop ending: max pages target hit ({len(self.pages_crawled)}/{self.max_pages})")
                     break
 
-                
                 while len(active_tasks) < CONCURRENCY:
                     queue_item = await self.pop_from_queue()
                     if not queue_item:
@@ -198,14 +175,13 @@ class CrawlCoordinator:
                     active_tasks.add(task)
 
                 if not active_tasks:
-                   
+                    logger.debug("[DEBUG] Worker pool loop ending: no active or queued tasks remaining.")
                     break
 
-                
                 await asyncio.wait(active_tasks, return_when=asyncio.FIRST_COMPLETED)
 
-            
             if active_tasks:
+                logger.debug(f"[DEBUG] Awaiting remaining {len(active_tasks)} active tasks to finish...")
                 await asyncio.gather(*active_tasks, return_exceptions=True)
 
         self.is_crawling = False

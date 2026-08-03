@@ -1,18 +1,19 @@
-import re
+
+import logging
 from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
+
+logger = logging.getLogger("parser")
 
 class DocParser:
     @staticmethod
     def clean_html(html_content: str) -> BeautifulSoup:
-        """Parse HTML and strip common non-content tags."""
+        logger.debug(f"[DEBUG] Cleaning HTML content (raw length: {len(html_content)} chars)...")
         soup = BeautifulSoup(html_content, "html.parser")
-        
         
         for element in soup(["script", "style", "iframe", "noscript", "svg", "form"]):
             element.decompose()
             
-        
         selectors_to_remove = [
             "nav", "footer", "header", "aside",
             ".nav", ".footer", ".header", ".sidebar", ".navigation", ".menu",
@@ -28,15 +29,9 @@ class DocParser:
 
     @classmethod
     def extract_links(cls, html_content: str, base_url: str, limit_domain: bool = True) -> list[str]:
-        """Extract all valid hyperlinks from the page belonging to the same domain."""
-      
         soup = BeautifulSoup(html_content, "html.parser")
         parsed_base = urlparse(base_url)
         base_domain = parsed_base.netloc 
-
-        
-        base_parts = base_domain.split(".")
-        root_domain = ".".join(base_parts[-2:]) if len(base_parts) >= 2 else base_domain
 
         links = []
         for anchor in soup.find_all("a", href=True):
@@ -45,15 +40,12 @@ class DocParser:
                 continue
            
             absolute_url = urljoin(base_url, href)
-            
             parsed_url = urlparse(absolute_url)
             clean_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}".rstrip("/")
 
-            
             if parsed_url.scheme not in ("http", "https"):
                 continue
 
-            
             path_lower = parsed_url.path.lower()
             if any(path_lower.endswith(ext) for ext in (
                 ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp",
@@ -63,43 +55,33 @@ class DocParser:
 
             if limit_domain:
                 link_domain = parsed_url.netloc
-                
-                if link_domain == base_domain or link_domain.endswith("." + root_domain):
+                if link_domain == base_domain:
                     links.append(clean_url)
             else:
                 links.append(clean_url)
 
-       
-        return list(dict.fromkeys(links))
-
+        unique_links = list(dict.fromkeys(links))
+        logger.debug(f"[DEBUG] Extracted {len(unique_links)} unique links from {base_url} (limit_domain={limit_domain})")
+        return unique_links
 
     @classmethod
     def parse_document(cls, html_content: str, url: str) -> dict:
-        """
-        Extract title and hierarchical text blocks (headings + paragraphs) from the page.
-        """
+        logger.debug(f"[DEBUG] Parsing document for URL: {url}")
         soup = cls.clean_html(html_content)
         
-       
         title_tag = soup.find("title")
         title = title_tag.get_text().strip() if title_tag else ""
         if not title:
             h1_tag = soup.find("h1")
             title = h1_tag.get_text().strip() if h1_tag else "Untitled Documentation Page"
             
-       
-        title = re.sub(r"\s*\|\s*.*$", "", title)
-        title = re.sub(r"\s*-\s*.*$", "", title)
         title = title.strip()
-        
-       
         content_blocks = []
         current_header = None
         
         body = soup.find("body") or soup
         
         for element in body.find_all(["h1", "h2", "h3", "h4", "p", "li", "pre", "code"]):
-           
             text = element.get_text().strip()
             if not text:
                 continue
@@ -115,7 +97,6 @@ class DocParser:
                     "header": current_header
                 })
             elif tag_name == "p":
-                
                 if len(text) > 10:
                     content_blocks.append({
                         "type": "paragraph",
@@ -129,13 +110,13 @@ class DocParser:
                     "header": current_header
                 })
             elif tag_name == "pre":
-             
                 content_blocks.append({
                     "type": "code_block",
                     "text": text,
                     "header": current_header
                 })
                 
+        logger.debug(f"[DEBUG] Document parsed successfully: Title='{title}', Total Blocks={len(content_blocks)}")
         return {
             "url": url,
             "title": title,

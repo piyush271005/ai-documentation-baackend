@@ -12,19 +12,19 @@ class EmbeddingService:
 
     @property
     def client(self) -> genai.Client:
-        """Lazy load the Google GenAI Client."""
+        
         if self._client is None:
-            api_key = settings.GEMINI_API_KEY or os.environ.get("GEMINI_API_KEY")
+            api_key = settings.GEMINI_API_KEY 
             if not api_key:
                 logger.warning("GEMINI_API_KEY is not set. Please set GEMINI_API_KEY in settings or environment.")
             logger.info(f"Initializing Google GenAI Client with embedding model '{self.model_name}'...")
-            self._client = genai.Client(api_key=api_key or "NO_KEY_PROVIDED")
+            self._client = genai.Client(api_key=api_key)
         return self._client
 
     def embed_query(self, text: str) -> list[float]:
-        """Embed a single user query using Google GenAI API (text-embedding-004)."""
+        logger.debug(f"[DEBUG] Embedding single query (len={len(text)} chars) using model '{self.model_name}'...")
         try:
-            api_key = settings.GEMINI_API_KEY or os.environ.get("GEMINI_API_KEY")
+            api_key = settings.GEMINI_API_KEY 
             if not api_key:
                 logger.error("GEMINI_API_KEY missing for embedding. Returning fallback vector.")
                 return [0.0] * 768
@@ -33,15 +33,18 @@ class EmbeddingService:
                 model=self.model_name,
                 contents=text
             )
-            return list(response.embeddings[0].values)
+            vec = list(response.embeddings[0].values)
+            logger.debug(f"[DEBUG] Query embedded successfully (vector dim={len(vec)})")
+            return vec
         except Exception as e:
             logger.error(f"Error embedding query with Google GenAI API: {e}")
             return [0.0] * 768
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        """Embed a batch of document texts using Google GenAI API (text-embedding-004)."""
         if not texts:
+            logger.debug("[DEBUG] embed_documents called with empty text list. Returning empty list.")
             return []
+        logger.debug(f"[DEBUG] Batch embedding {len(texts)} document chunks using model '{self.model_name}'...")
         try:
             api_key = settings.GEMINI_API_KEY or os.environ.get("GEMINI_API_KEY")
             if not api_key:
@@ -52,7 +55,9 @@ class EmbeddingService:
                 model=self.model_name,
                 contents=texts
             )
-            return [list(emb.values) for emb in response.embeddings]
+            vectors = [list(emb.values) for emb in response.embeddings]
+            logger.debug(f"[DEBUG] Batch embedding completed successfully: {len(vectors)} vectors generated.")
+            return vectors
         except Exception as e:
             logger.error(f"Error embedding documents with Google GenAI API: {e}")
             return [[0.0] * 768 for _ in texts]

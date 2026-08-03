@@ -1,9 +1,9 @@
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 
 class CrawlRequest(BaseModel):
-    url: str = Field(..., description="The base URL of the documentation site to crawl")
-    max_pages: int = Field(50, ge=1, le=500, description="Maximum number of pages to crawl")
+    url: str 
+    max_pages: int = 50
 
 class CrawlResponse(BaseModel):
     status: str
@@ -21,8 +21,8 @@ class SourceChunk(BaseModel):
     combined_score: float
 
 class QueryRequest(BaseModel):
-    query: str = Field(..., min_length=3, description="Search query/question")
-    llm_provider: Optional[str] = Field(None, description="Override the default LLM provider")
+    query: str 
+    llm_provider: Optional[str] 
 
 class QueryResponse(BaseModel):
     query: str

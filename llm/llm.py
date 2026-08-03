@@ -2,13 +2,14 @@ import re
 import httpx
 import logging
 from backend.config import settings
+import os
 
 logger = logging.getLogger("llm")
 
 class LLMService:
     @staticmethod
     def _create_rag_prompt(query: str, chunks: list[dict]) -> tuple[str, str]:
-        """Creates system and user prompts for RAG."""
+        
         system_prompt = (
             "You are an expert technical documentation assistant. "
             "Use the provided documentation snippets to write ONE single, comprehensive, well-structured answer. "
@@ -30,30 +31,30 @@ class LLMService:
         return system_prompt, user_prompt
 
     async def generate_answer(self, query: str, chunks: list[dict], provider_override: str = None) -> str:
-        """
-        Generates an answer based on query and retrieved contexts.
-        Dynamically falls back to Mock provider if keys/configs are missing.
-        """
         provider = provider_override or settings.DEFAULT_LLM_PROVIDER
+        logger.debug(f"[DEBUG] Generating answer for query='{query}' using provider='{provider}' and {len(chunks)} source chunks...")
         
-        # Format Prompt
         sys_prompt, user_prompt = self._create_rag_prompt(query, chunks)
+        logger.debug(f"[DEBUG] Prompt generated: sys_len={len(sys_prompt)}, user_len={len(user_prompt)}")
         
         if provider == "openai":
             key = settings.OPENAI_API_KEY or os.environ.get("OPENAI_API_KEY")
             if not key:
+                logger.debug("[DEBUG] OpenAI API key missing.")
                 return "OpenAI API key is missing. Please set your OPENAI_API_KEY in LLM Settings."
             return await self._call_openai(sys_prompt, user_prompt, key)
             
         elif provider == "gemini":
             key = settings.GEMINI_API_KEY or os.environ.get("GEMINI_API_KEY")
             if not key:
+                logger.debug("[DEBUG] Gemini API key missing.")
                 return "Gemini API key is missing. Please set your GEMINI_API_KEY in LLM Settings."
             return await self._call_gemini(sys_prompt, user_prompt, key)
             
         elif provider == "groq":
             key = settings.GROQ_API_KEY or os.environ.get("GROQ_API_KEY")
             if not key:
+                logger.debug("[DEBUG] Groq API key missing.")
                 return "Groq API key is missing. Please set your GROQ_API_KEY in LLM Settings."
             return await self._call_groq(sys_prompt, user_prompt, key)
 
@@ -61,16 +62,17 @@ class LLMService:
             return await self._call_ollama(sys_prompt, user_prompt)
             
         else:
-            # Default to Gemini if set, otherwise try Groq or prompt for provider configuration
             key = settings.GEMINI_API_KEY or os.environ.get("GEMINI_API_KEY")
             if key:
                 return await self._call_gemini(sys_prompt, user_prompt, key)
             groq_key = settings.GROQ_API_KEY or os.environ.get("GROQ_API_KEY")
             if groq_key:
                 return await self._call_groq(sys_prompt, user_prompt, groq_key)
+            logger.debug("[DEBUG] No active LLM provider key available.")
             return "No active LLM provider configured. Please select Gemini, Groq, OpenAI, or Ollama in LLM Settings and provide an API key."
 
     async def _call_openai(self, system_prompt: str, user_prompt: str, api_key: str) -> str:
+        logger.debug("[DEBUG] Sending request to OpenAI API (model: gpt-4o-mini)...")
         url = "https://api.openai.com/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -89,7 +91,9 @@ class LLMService:
                 res = await client.post(url, json=data, headers=headers, timeout=30.0)
                 if res.status_code == 200:
                     result = res.json()
-                    return result["choices"][0]["message"]["content"].strip()
+                    answer = result["choices"][0]["message"]["content"].strip()
+                    logger.debug(f"[DEBUG] OpenAI response received successfully (len={len(answer)} chars).")
+                    return answer
                 else:
                     logger.error(f"OpenAI error: {res.status_code} - {res.text}")
                     return f"Error from OpenAI API (Status {res.status_code}): {res.text[:100]}"
@@ -98,10 +102,10 @@ class LLMService:
             return f"Error contacting OpenAI: {str(e)}"
 
     async def _call_gemini(self, system_prompt: str, user_prompt: str, api_key: str) -> str:
-        # Use Gemini 2.0 Flash (fast + capable)
+        logger.debug("[DEBUG] Sending request to Gemini API (model: gemini-2.0-flash)...")
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
         headers = {"Content-Type": "application/json"}
-        # Combine system prompt & user prompt for Gemini API structure
+       
         data = {
             "contents": [
                 {
@@ -119,7 +123,9 @@ class LLMService:
                 res = await client.post(url, json=data, headers=headers, timeout=30.0)
                 if res.status_code == 200:
                     result = res.json()
-                    return result["candidates"][0]["content"]["parts"][0]["text"].strip()
+                    answer = result["candidates"][0]["content"]["parts"][0]["text"].strip()
+                    logger.debug(f"[DEBUG] Gemini response received successfully (len={len(answer)} chars).")
+                    return answer
                 else:
                     logger.error(f"Gemini error: {res.status_code} - {res.text}")
                     return f"Error from Gemini API (Status {res.status_code}): {res.text[:100]}"
@@ -128,7 +134,7 @@ class LLMService:
             return f"Error contacting Gemini: {str(e)}"
 
     async def _call_groq(self, system_prompt: str, user_prompt: str, api_key: str) -> str:
-        """Call Groq API (OpenAI-compatible endpoint with Llama 3.3 70B)."""
+        logger.debug("[DEBUG] Sending request to Groq Cloud API (model: llama-3.3-70b-versatile)...")
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -147,7 +153,9 @@ class LLMService:
                 res = await client.post(url, json=data, headers=headers, timeout=30.0)
                 if res.status_code == 200:
                     result = res.json()
-                    return result["choices"][0]["message"]["content"].strip()
+                    answer = result["choices"][0]["message"]["content"].strip()
+                    logger.debug(f"[DEBUG] Groq response received successfully (len={len(answer)} chars).")
+                    return answer
                 else:
                     logger.error(f"Groq error: {res.status_code} - {res.text}")
                     return f"Error from Groq API (Status {res.status_code}): {res.text[:100]}"
@@ -156,6 +164,7 @@ class LLMService:
             return f"Error contacting Groq API: {str(e)}"
 
     async def _call_ollama(self, system_prompt: str, user_prompt: str) -> str:
+        logger.debug(f"[DEBUG] Sending request to local Ollama server at {settings.OLLAMA_BASE_URL} (model: llama3.2:3b)...")
         url = f"{settings.OLLAMA_BASE_URL}/api/generate"
         
         data = {
@@ -172,15 +181,15 @@ class LLMService:
                 res = await client.post(url, json=data, timeout=30.0)
                 if res.status_code == 200:
                     result = res.json()
-                    return result["response"].strip()
+                    answer = result["response"].strip()
+                    logger.debug(f"[DEBUG] Ollama response received successfully (len={len(answer)} chars).")
+                    return answer
                 else:
                     logger.error(f"Ollama error: {res.status_code} - {res.text}")
                     return f"Error from local Ollama (Status {res.status_code}): Make sure Ollama is running and has the 'llama3.2:3b' model loaded."
         except Exception as e:
             logger.error(f"Failed to connect to Ollama: {e}")
             return f"Could not connect to Ollama. Make sure it is running at {settings.OLLAMA_BASE_URL} and the model 'llama3.2:3b' is pulled."
-
-
 
 # Global LLM service instance
 llm_service = LLMService()
